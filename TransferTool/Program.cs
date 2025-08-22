@@ -12,6 +12,8 @@ namespace TransferTool
         static bool RETRY_ACTIVATED = false; // flag that will help me know the retry is being attempted and for it I should not
                                              // simulate failure of those chunks again.
         static int TOTAL_FILE_CHUNKS = 0; // total number of file chunks to be transferred
+        static Queue<int> CHUNK_NUMBER_QUEUE = new Queue<int>();
+        static object LOCK_OBJECT = new object();
 
         static void Main(string[] args)
         {
@@ -51,8 +53,9 @@ namespace TransferTool
 
                     TOTAL_FILE_CHUNKS = (int)Math.Ceiling((decimal)reader.Length / (1024 * 1024));
 
-                    Console.WriteLine($"The source file's size is {reader.Length} bytes or {Math.Round((double)reader.Length / (1024 * 1024 * 1024), 2)} GB.\nThe transfer operation will use {Program.TOTAL_FILE_CHUNKS} 1MB chunks.");
+                    Console.WriteLine($"The source file's size is {reader.Length} bytes or {Math.Round((double)reader.Length / (1024 * 1024 * 1024), 2)} GB.\nThe transfer operation will use {Program.TOTAL_FILE_CHUNKS} 1MB chunks.\nTwo different threads will be running simultaneously to do the transfer.");
 
+                    CHUNK_NUMBER_QUEUE = new Queue<int>(Enumerable.Range(1, TOTAL_FILE_CHUNKS));
                 }
             }
             catch (FileNotFoundException ex)
@@ -79,7 +82,7 @@ namespace TransferTool
             Console.WriteLine($"There are {TOTAL_FILE_CHUNKS} which will be transferred to the destination. Please specify which chunk numbers 1-{TOTAL_FILE_CHUNKS} are supposed to be simulated as failed in a comma separated list. For none, please just press enter without an input.");
             string? userInput = Console.ReadLine();
 
-            if (userInput != null)
+            if (!string.IsNullOrWhiteSpace(userInput))
             {
                 string[] chunksFailed = userInput.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(c => c.Trim())
@@ -132,13 +135,37 @@ namespace TransferTool
 
         static void TransferFile()
         {
-            for (int i = 1; i <= TOTAL_FILE_CHUNKS; i++)
-            {
-                TransferFileChunk(SOURCE_FILE_PATH, TARGET_FILE_PATH, BUFFER_SIZE, (i - 1) * 1024 * 1024, i);
-            }
+            Console.WriteLine("");
+
+            Thread t1 = new Thread(Intermediary);
+            t1.Name = "1";
+            Thread t2 = new Thread(Intermediary);
+            t2.Name = "2";
+
+            t1.Start();
+            t2.Start();
+
+            t1.Join();
+            t2.Join();
 
             CompareSHA1Hashes(SOURCE_FILE_PATH, TARGET_FILE_PATH);
             CompareSHA256Hashes(SOURCE_FILE_PATH, TARGET_FILE_PATH);
+        }
+
+        static void Intermediary()
+        {
+            while(true)
+            {
+                int chunkNumber;
+                lock(LOCK_OBJECT)
+                {
+                    if (CHUNK_NUMBER_QUEUE.Count == 0) return;
+
+                    chunkNumber = CHUNK_NUMBER_QUEUE.Dequeue();
+                }
+
+                TransferFileChunk(SOURCE_FILE_PATH, TARGET_FILE_PATH, BUFFER_SIZE, (chunkNumber - 1) * 1024 * 1024, chunkNumber);
+            }
         }
 
         static void TransferFileChunk(string source, string target, int chunkSize, int currentPosition, int chunkNumber)
@@ -148,7 +175,7 @@ namespace TransferTool
 
             using (FileStream reader = new FileStream(source, FileMode.Open, FileAccess.Read))
             {
-                using (FileStream writer = new FileStream(target, FileMode.OpenOrCreate, FileAccess.Write))
+                using (FileStream writer = new FileStream(target, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))
                 {
                     // set current position within the stream
                     reader.Seek(currentPosition, SeekOrigin.Begin);
@@ -213,14 +240,14 @@ namespace TransferTool
                 Console.BackgroundColor = ConsoleColor.Black;
             }
 
-            Console.WriteLine($"Chunk: {chunkNumber}, Bytes: {readCount}, Position: {currentPosition}, MD5: {sBuilder.ToString()}, Transfer status: {(isValid ? "OK" : "FAIL")}");
+            Console.WriteLine($"Chunk: {chunkNumber}, Thread: {Thread.CurrentThread.Name}, Bytes: {readCount}, Position: {currentPosition}, MD5: {sBuilder.ToString()}, Transfer status: {(isValid ? "OK" : "FAIL")}");
         }
 
         static bool ValidateTransferFileChunk(string sourceHash, int currentPosition)
         {
             StringBuilder sBuilder;
 
-            using (FileStream reader = new FileStream(TARGET_FILE_PATH, FileMode.Open, FileAccess.Read))
+            using (FileStream reader = new FileStream(TARGET_FILE_PATH, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
                 // set current position within the stream
                 reader.Seek(currentPosition, SeekOrigin.Begin);
