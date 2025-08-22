@@ -5,8 +5,8 @@ namespace TransferTool
 {
     internal class Program
     {
-        static string SOURCE_FILE_PATH = @"C:\300.Rise.of.an.Empire.2014.mp4"; // size: 1.64 GB
-        static string TARGET_FILE_PATH = @"D:\Temp\300.Rise.of.an.Empire.2014.mp4";
+        static string SOURCE_FILE_PATH = @"C:\Dune.2021.mkv"; // size: 7444819566 bytes or 6.93 GB
+        static string TARGET_FILE_PATH = @"D:\Temp\Dune.2021.mkv";
         static int BUFFER_SIZE = 1024 * 1024; // 1 MB        
         static List<int> RETRY_CHUNK_LIST = new List<int>(); // chunk numbers listed here will be simulated to fail.
         static bool RETRY_ACTIVATED = false; // flag that will help me know the retry is being attempted and for it I should not
@@ -164,11 +164,11 @@ namespace TransferTool
                     chunkNumber = CHUNK_NUMBER_QUEUE.Dequeue();
                 }
 
-                TransferFileChunk(SOURCE_FILE_PATH, TARGET_FILE_PATH, BUFFER_SIZE, (chunkNumber - 1) * 1024 * 1024, chunkNumber);
+                TransferFileChunk(SOURCE_FILE_PATH, TARGET_FILE_PATH, BUFFER_SIZE, (long)(chunkNumber - 1) * 1024 * 1024, chunkNumber);
             }
         }
 
-        static void TransferFileChunk(string source, string target, int chunkSize, int currentPosition, int chunkNumber)
+        static void TransferFileChunk(string source, string target, int chunkSize, long currentPosition, int chunkNumber)
         {
             StringBuilder sBuilder;
             int readCount = 0;
@@ -243,7 +243,7 @@ namespace TransferTool
             Console.WriteLine($"Chunk: {chunkNumber}, Thread: {Thread.CurrentThread.Name}, Bytes: {readCount}, Position: {currentPosition}, MD5: {sBuilder.ToString()}, Transfer status: {(isValid ? "OK" : "FAIL")}");
         }
 
-        static bool ValidateTransferFileChunk(string sourceHash, int currentPosition)
+        static bool ValidateTransferFileChunk(string sourceHash, long currentPosition)
         {
             StringBuilder sBuilder;
 
@@ -403,11 +403,10 @@ namespace TransferTool
             RETRY_ACTIVATED = true;
             foreach (int chunkNumber in RETRY_CHUNK_LIST)
             {
-                TransferFileChunk(SOURCE_FILE_PATH, TARGET_FILE_PATH, BUFFER_SIZE, (chunkNumber - 1) * 1024 * 1024, chunkNumber);
+                CHUNK_NUMBER_QUEUE.Enqueue(chunkNumber);
             }
 
-            CompareSHA1Hashes(SOURCE_FILE_PATH, TARGET_FILE_PATH);
-            CompareSHA256Hashes(SOURCE_FILE_PATH, TARGET_FILE_PATH);
+            TransferFile();
         }
     }
 }
